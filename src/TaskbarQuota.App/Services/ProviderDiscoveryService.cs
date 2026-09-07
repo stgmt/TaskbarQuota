@@ -194,6 +194,10 @@ public static class ProviderDiscoveryService
     {
         if (IsExplicitlyDisabled(result.Id))
             return false;
+        // Fork: user-hidden providers stay out of the dashboard sidebar (Hidden group restores them),
+        // even when installed and working. Widget tiles are unaffected.
+        if (WidgetSettingsService.IsProviderUserHidden(result.Id))
+            return false;
         if (ProviderInstallDetector.IsInstalled(result.Id))
             return true;
         if (result.Id == active)

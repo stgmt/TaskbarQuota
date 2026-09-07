@@ -98,6 +98,14 @@ namespace TaskbarQuota
             if (args.SelectedItemContainer is not NavigationViewItem { Tag: ProviderId id })
                 return false;
 
+            if (WidgetSettingsService.IsProviderUserHidden(id))
+            {
+                // Hidden-group entries are restored via right-click, never opened.
+                // Bounce selection back to the currently shown card.
+                ReselectCurrentCard();
+                return true;
+            }
+
             _requestedProviderId = id;
             bool providerIsKnown = _viewModel.Cards.Any(card => card.ProviderId == id)
                 || _viewModel.AvailableCards.Any(card => card.ProviderId == id);
@@ -147,10 +155,13 @@ namespace TaskbarQuota
                     Tag = card.ProviderId,
                     Icon = CreateProviderIcon(card.ProviderId),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
+                    ContextFlyout = BuildHideFlyout(card.ProviderId),
                 };
                 ApplyPinBadge(item, card.ProviderId, card.DisplayName);
                 _providerGroup.MenuItems.Add(item);
             }
+
+            AddHiddenGroup();
 
             if (_requestedProviderId is ProviderId requested
                 && !_viewModel.Cards.Any(card => card.ProviderId == requested))
@@ -190,6 +201,71 @@ namespace TaskbarQuota
 
                 SetActiveVisual(navItem, isSelected);
             }
+        }
+
+        /// <summary>
+        /// Collapsible group with providers the user hid from this list.
+        /// Hidden when empty. Right-click a child to show it back.
+        /// </summary>
+        private void AddHiddenGroup()
+        {
+            var hidden = WidgetSettingsService.UserHiddenDashboardProviderIds();
+            if (hidden.Count == 0)
+                return;
+
+            var group = new NavigationViewItem
+            {
+                Content = $"Hidden ({hidden.Count})",
+                IsExpanded = false,
+                SelectsOnInvoked = false,
+            };
+            ToolTipService.SetToolTip(group, "Providers you hid from this list. Right-click one to show it back.");
+            var service = UsageCoordinator.Instance.Service;
+            foreach (var id in hidden)
+            {
+                var child = new NavigationViewItem
+                {
+                    Content = service.Get(id)?.DisplayName ?? id.ToString(),
+                    Tag = id,
+                    Icon = CreateProviderIcon(id),
+                    ContextFlyout = BuildUnhideFlyout(id),
+                };
+                ToolTipService.SetToolTip(child, "Right-click to show back in the list");
+                group.MenuItems.Add(child);
+            }
+            _providerGroup.MenuItems.Add(group);
+        }
+
+        private static MenuFlyout BuildHideFlyout(ProviderId id)
+        {
+            var hide = new MenuFlyoutItem { Text = "Hide from sidebar" };
+            hide.Click += (_, _) => WidgetSettingsService.SetProviderUserHidden(id, true);
+            return new MenuFlyout { Items = { hide } };
+        }
+
+        private static MenuFlyout BuildUnhideFlyout(ProviderId id)
+        {
+            var show = new MenuFlyoutItem { Text = "Show in sidebar" };
+            show.Click += (_, _) => WidgetSettingsService.SetProviderUserHidden(id, false);
+            return new MenuFlyout { Items = { show } };
+        }
+
+        private void ReselectCurrentCard()
+        {
+            var current = _requestedProviderId ?? _viewModel.SelectedCard?.ProviderId;
+            IsSyncing = true;
+            foreach (var item in _providerGroup.MenuItems)
+            {
+                if (item is NavigationViewItem navItem
+                    && navItem.Tag is ProviderId tag
+                    && current is ProviderId currentId
+                    && tag == currentId)
+                {
+                    _nav.SelectedItem = navItem;
+                    break;
+                }
+            }
+            IsSyncing = false;
         }
 
         /// <summary>

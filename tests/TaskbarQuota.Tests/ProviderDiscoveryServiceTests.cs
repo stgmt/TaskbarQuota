@@ -169,4 +169,69 @@ public class ProviderDiscoveryServiceTests
         Assert.False(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: null));
         Assert.True(ProviderDiscoveryService.ShouldFetch(ProviderId.Grok, active: ProviderId.Grok));
     }
+
+    [Fact]
+    public void ShouldShowInDashboard_HidesUserHiddenInstalledProvider()
+    {
+        ProviderInstallDetector.IsInstalledOverrideForTesting = _ => true;
+        var snapshot = WidgetSettingsService.SnapshotUserHiddenDashboardForTesting();
+        try
+        {
+            WidgetSettingsService.SetProviderUserHidden(ProviderId.Grok, true);
+            var provider = new UsageService().Get(ProviderId.Grok)!;
+            var result = UsageResult.Success(
+                ProviderId.Grok,
+                provider,
+                new ProviderFetchResult(new UsageSnapshot(new RateWindow(12)), "test"));
+
+            Assert.False(ProviderDiscoveryService.ShouldShowInDashboard(result, active: null));
+        }
+        finally
+        {
+            WidgetSettingsService.RestoreUserHiddenDashboardForTesting(snapshot);
+        }
+    }
+
+    [Fact]
+    public void ShouldShowInDashboard_ShowsInstalledProviderAfterUnhide()
+    {
+        ProviderInstallDetector.IsInstalledOverrideForTesting = _ => true;
+        var snapshot = WidgetSettingsService.SnapshotUserHiddenDashboardForTesting();
+        try
+        {
+            WidgetSettingsService.SetProviderUserHidden(ProviderId.Grok, true);
+            WidgetSettingsService.SetProviderUserHidden(ProviderId.Grok, false);
+            var provider = new UsageService().Get(ProviderId.Grok)!;
+            var result = UsageResult.Success(
+                ProviderId.Grok,
+                provider,
+                new ProviderFetchResult(new UsageSnapshot(new RateWindow(12)), "test"));
+
+            Assert.True(ProviderDiscoveryService.ShouldShowInDashboard(result, active: null));
+        }
+        finally
+        {
+            WidgetSettingsService.RestoreUserHiddenDashboardForTesting(snapshot);
+        }
+    }
+
+    [Fact]
+    public void UserHiddenDashboard_PersistsAcrossReload()
+    {
+        var snapshot = WidgetSettingsService.SnapshotUserHiddenDashboardForTesting();
+        try
+        {
+            Assert.False(WidgetSettingsService.IsProviderUserHidden(ProviderId.Claude));
+
+            WidgetSettingsService.SetProviderUserHidden(ProviderId.Claude, true);
+            WidgetSettingsService.ReloadUserHiddenDashboardForTesting();
+
+            Assert.True(WidgetSettingsService.IsProviderUserHidden(ProviderId.Claude));
+            Assert.Contains(ProviderId.Claude, WidgetSettingsService.UserHiddenDashboardProviderIds());
+        }
+        finally
+        {
+            WidgetSettingsService.RestoreUserHiddenDashboardForTesting(snapshot);
+        }
+    }
 }

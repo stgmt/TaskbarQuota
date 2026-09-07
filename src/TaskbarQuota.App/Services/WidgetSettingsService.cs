@@ -92,6 +92,8 @@ public static class WidgetSettingsService
 
     private static readonly string DashboardProvidersPath =
         Path.Combine(AppStorage.AppDataDirectory, "dashboard-providers.json");
+    private static readonly string UserHiddenDashboardPath =
+        Path.Combine(AppStorage.AppDataDirectory, "user-hidden-dashboard.json");
 
     private static readonly string AutoHideUnavailablePath =
         Path.Combine(AppStorage.AppDataDirectory, "auto-hide-unavailable.txt");
@@ -107,6 +109,7 @@ public static class WidgetSettingsService
     private static readonly Dictionary<string, bool> RowVisibility = LoadRowVisibility();
     private static readonly Dictionary<string, bool> ProviderVisibility = LoadProviderVisibility();
     private static readonly Dictionary<string, bool> DashboardProviderVisibility = LoadDashboardProviderVisibility();
+    private static readonly HashSet<string> UserHiddenDashboardProviders = LoadUserHiddenDashboardProviders();
     private static readonly Dictionary<string, bool> ProviderPins = LoadProviderPins();
     private static readonly Dictionary<string, string> AdaptiveProviderDisplays = LoadAdaptiveProviderDisplays();
     private static readonly Dictionary<string, string> PinnedProviderDisplays = LoadPinnedProviderDisplays();
@@ -392,6 +395,45 @@ public static class WidgetSettingsService
         SaveDashboardProviderVisibility();
         DashboardCompositionChanged?.Invoke(null, EventArgs.Empty);
         Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>Providers the user hid from the dashboard sidebar into the collapsible Hidden group.</summary>
+    public static bool IsProviderUserHidden(ProviderId provider)
+        => UserHiddenDashboardProviders.Contains(provider.ToString());
+
+    /// <summary>All user-hidden providers in registration order.</summary>
+    public static IReadOnlyList<ProviderId> UserHiddenDashboardProviderIds()
+        => ((ProviderId[])Enum.GetValues(typeof(ProviderId))).Where(IsProviderUserHidden).ToList();
+
+    public static void SetProviderUserHidden(ProviderId provider, bool hidden)
+    {
+        bool changed = hidden
+            ? UserHiddenDashboardProviders.Add(provider.ToString())
+            : UserHiddenDashboardProviders.Remove(provider.ToString());
+        if (!changed)
+            return;
+
+        SaveUserHiddenDashboardProviders();
+        DashboardCompositionChanged?.Invoke(null, EventArgs.Empty);
+        Changed?.Invoke(null, EventArgs.Empty);
+    }
+
+    internal static HashSet<string> SnapshotUserHiddenDashboardForTesting()
+        => new(UserHiddenDashboardProviders, StringComparer.OrdinalIgnoreCase);
+
+    internal static void RestoreUserHiddenDashboardForTesting(HashSet<string> snapshot)
+    {
+        UserHiddenDashboardProviders.Clear();
+        foreach (var id in snapshot)
+            UserHiddenDashboardProviders.Add(id);
+        SaveUserHiddenDashboardProviders();
+    }
+
+    internal static void ReloadUserHiddenDashboardForTesting()
+    {
+        UserHiddenDashboardProviders.Clear();
+        foreach (var id in LoadUserHiddenDashboardProviders())
+            UserHiddenDashboardProviders.Add(id);
     }
 
     internal static bool SetProviderVisibleSilent(ProviderId provider, bool visible)
@@ -991,6 +1033,37 @@ public static class WidgetSettingsService
         {
             Directory.CreateDirectory(Path.GetDirectoryName(DashboardProvidersPath)!);
             File.WriteAllText(DashboardProvidersPath, JsonSerializer.Serialize(DashboardProviderVisibility, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch
+        {
+            // Best effort.
+        }
+    }
+
+    private static HashSet<string> LoadUserHiddenDashboardProviders()
+    {
+        try
+        {
+            if (!File.Exists(UserHiddenDashboardPath))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var loaded = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(UserHiddenDashboardPath));
+            return loaded is null
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(loaded, StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static void SaveUserHiddenDashboardProviders()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(UserHiddenDashboardPath)!);
+            File.WriteAllText(UserHiddenDashboardPath, JsonSerializer.Serialize(UserHiddenDashboardProviders.OrderBy(id => id), new JsonSerializerOptions { WriteIndented = true }));
         }
         catch
         {
