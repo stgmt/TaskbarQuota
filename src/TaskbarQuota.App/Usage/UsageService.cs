@@ -50,6 +50,7 @@ namespace TaskbarQuota.Usage
             Register(new ClinePassProvider());
             Register(new ZaiProvider());
             Register(new KimiProvider());
+            Register(new OmpProvider());
 
             // Rehydrate the previous session's values so the widget can paint real numbers at boot
             // instead of a placeholder while the first fetch runs (issue #21).

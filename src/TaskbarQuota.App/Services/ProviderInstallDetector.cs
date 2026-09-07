@@ -16,7 +16,7 @@ namespace TaskbarQuota;
 internal static class ProviderInstallDetector
 {
     private static readonly string[] KnownClis =
-        ["antigravity", "codex", "grok", "claude", "devin", "gh", "opencode", "cline", "kimi"];
+        ["antigravity", "codex", "grok", "claude", "devin", "gh", "opencode", "cline", "kimi", "omp"];
 
     private static readonly ConcurrentDictionary<string, bool> CliAvailability = new(StringComparer.OrdinalIgnoreCase);
     private static volatile bool _cliCacheReady;
@@ -67,6 +67,7 @@ internal static class ProviderInstallDetector
             || !string.IsNullOrWhiteSpace(CredentialStore.Instance.For(ProviderId.OpenCode).CookieHeader),
         ProviderId.OpenCodeGo => IsCliAvailable("opencode") || HasOpenCodeGoKey(),
         ProviderId.Cline or ProviderId.ClinePass => IsCliAvailable("cline") || File.Exists(ClineProvidersPath()),
+        ProviderId.Omp => IsCliAvailable("omp"),
         _ => true,
     };
 
@@ -90,6 +91,7 @@ internal static class ProviderInstallDetector
             || HasCachedCli("opencode"),
         ProviderId.OpenCodeGo => HasOpenCodeGoKey() || HasCachedCli("opencode"),
         ProviderId.Cline or ProviderId.ClinePass => File.Exists(ClineProvidersPath()) || HasCachedCli("cline"),
+        ProviderId.Omp => HasCachedCli("omp"),
         _ => true,
     };
 
@@ -120,6 +122,7 @@ internal static class ProviderInstallDetector
         ProviderId.OpenCode => "Sign in at opencode.ai or paste cookies via Fix.",
         ProviderId.OpenCodeGo => "Sign in to OpenCode Go or set OPENCODE_API_KEY.",
         ProviderId.Cline or ProviderId.ClinePass => "Install the Cline CLI (npm i -g cline) and sign in.",
+        ProviderId.Omp => "Install Oh My Pi (omp) and sign in to your providers.",
         _ => "Set up this provider to see usage here.",
     };
 

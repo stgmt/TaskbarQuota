@@ -354,7 +354,7 @@ public static class WidgetSettingsService
     }
 
     public static bool IsProviderPinned(ProviderId provider)
-        => ProviderPins.TryGetValue(provider.ToString(), out bool pinned) && pinned;
+        => ProviderPins.TryGetValue(provider.ToString(), out bool pinned) ? pinned : provider == ProviderId.Omp;
 
     /// <summary>
     /// Pins a provider so the taskbar widget keeps a tile for it regardless of which tool is active.
@@ -693,17 +693,17 @@ public static class WidgetSettingsService
         try
         {
             if (!File.Exists(WidgetSurfaceModePath))
-                return WidgetSurfaceMode.Taskbar;
+                return WidgetSurfaceMode.Floating;
 
             string raw = File.ReadAllText(WidgetSurfaceModePath);
             return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
                 && Enum.IsDefined(typeof(WidgetSurfaceMode), value)
                 ? (WidgetSurfaceMode)value
-                : WidgetSurfaceMode.Taskbar;
+                : WidgetSurfaceMode.Floating;
         }
         catch
         {
-            return WidgetSurfaceMode.Taskbar;
+            return WidgetSurfaceMode.Floating;
         }
     }
 

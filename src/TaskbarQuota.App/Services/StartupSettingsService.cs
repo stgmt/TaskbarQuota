@@ -6,7 +6,7 @@ namespace TaskbarQuota;
 public static class StartupSettingsService
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "TaskbarQuota";
+    private const string RunValueName = "OmpQuota";
     private const string LegacyRunValueName = "WinCheck";
     public const string StartupArgument = "--startup-widget";
 

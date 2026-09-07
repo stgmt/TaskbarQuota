@@ -29,11 +29,11 @@ public class WidgetSurfaceModeTests
     }
 
     [Fact]
-    public void Default_surface_is_taskbar()
+    public void Default_surface_is_floating_fork_default()
     {
         WithIsolatedSurfaceSettings(directory =>
         {
-            Assert.Equal(WidgetSurfaceMode.Taskbar, WidgetSettingsService.CurrentSurface);
+            Assert.Equal(WidgetSurfaceMode.Floating, WidgetSettingsService.CurrentSurface);
         });
     }
 

@@ -7,7 +7,7 @@ namespace TaskbarQuota;
 /// <summary>Paths under %LOCALAPPDATA% and one-time migration from the WinCheck folder name.</summary>
 public static class AppStorage
 {
-    public const string AppFolderName = "TaskbarQuota";
+    public const string AppFolderName = "OmpQuota";
     private const string LegacyAppFolderName = "WinCheck";
 
     private static string? _appDataDirectoryOverride;

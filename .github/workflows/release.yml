@@ -1,4 +1,4 @@
-# Build TaskbarQuotaSetup-{version}-x64.exe and TaskbarQuotaSetup-{version}-arm64.exe on version tags.
+# Build TaskbarQuotaSetup-{version}-x64.exe on version tags (x64 only).
 # GitHub automatically attaches Source code (zip) and Source code (tar.gz) from the tag.
 #
 # Usage:
@@ -62,7 +62,7 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Build installers (x64 + arm64)
+      - name: Build installer (x64 only)
         id: build
         run: |
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
@@ -75,8 +75,7 @@ jobs:
           $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
           $applicationVersion = [int]$parts[2]
           $targets = @(
-            @{ Platform = 'x64'; Rid = 'win-x64'; Arch = 'x64' },
-            @{ Platform = 'ARM64'; Rid = 'win-arm64'; Arch = 'arm64' }
+            @{ Platform = 'x64'; Rid = 'win-x64'; Arch = 'x64' }
           )
 
           $hashes = @()
@@ -169,8 +168,8 @@ jobs:
             '',
             '### Install',
             '',
-            '1. Download the `.exe` matching your CPU (`x64` for most PCs, `arm64` for Snapdragon / ARM Windows).',
-            '2. Run the installer and launch TaskbarQuota from the Start menu.',
+            '1. Download the `*-x64.exe` installer below and run it (64-bit Windows).',
+            '2. Run the installer and launch TaskbarQuota from the Start menu (64-bit Windows).',
             '3. Sign in to your AI tools as usual — TaskbarQuota reads local credentials and browser cookies where needed.',
             '',
             'SmartScreen may warn on unsigned builds — **More info** → **Run anyway**.'

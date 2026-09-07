@@ -20,7 +20,7 @@ namespace TaskbarQuota
     {
         /// <summary>Identifies the single instance that owns the taskbar widget. Per-user by design:
         /// AppInstance keys are scoped to the session, so different users get their own widget.</summary>
-        private const string SingleInstanceKey = "TaskbarQuota.MainInstance";
+        private const string SingleInstanceKey = "OmpQuota.MainInstance";
 
         [STAThread]
         private static int Main(string[] args)

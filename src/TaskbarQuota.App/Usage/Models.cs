@@ -19,6 +19,7 @@ namespace TaskbarQuota.Usage
         ClinePass,
         Zai,
         Kimi,
+        Omp,
     }
 
     /// <summary>A single rate-limit window (for example session or weekly), expressed as percent used.</summary>
