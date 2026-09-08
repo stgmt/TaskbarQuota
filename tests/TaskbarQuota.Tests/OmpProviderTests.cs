@@ -52,27 +52,26 @@ public class OmpProviderTests
         """;
 
     [Fact]
-    public void BuildResult_MapsEveryLimitToABar()
+    public void BuildResult_MapsEveryLiveLimitToABar()
     {
         var result = OmpProvider.BuildResult(SampleJson);
 
-        // 8 parseable limits (broken entry without amount is skipped):
-        // hottest becomes Primary, the other 7 land in the expandable list.
-        Assert.Equal(7, result.Usage.ExtraRateWindows.Count);
+        // opencode-go #1 is fully eaten on monthly, so the whole account is hidden.
+        // Left: oc#2 5h + zai + 2 antigravity + cline = 5; hottest becomes Primary, 4 extras.
+        Assert.Equal(4, result.Usage.ExtraRateWindows.Count);
         var ids = result.Usage.ExtraRateWindows.Select(w => w.Id).ToList();
         Assert.Equal(ids.Count, ids.Distinct().Count());
-        // Second opencode-go account gets an ordinal-suffixed id, not a collision.
         Assert.Contains("opencode-go#2:rolling-5h", ids);
+        Assert.DoesNotContain(ids, id => id.StartsWith("opencode-go:") || id.StartsWith("opencode-go#1:"));
     }
 
     [Fact]
-    public void BuildResult_PrimaryIsHottestWindow()
+    public void BuildResult_PrimaryIsHottestLiveWindow()
     {
         var result = OmpProvider.BuildResult(SampleJson);
 
-        // opencode-go monthly is exhausted at 100% — hotter than Antigravity weekly at 93.3%.
-        Assert.InRange(result.Usage.Primary.UsedPercent, 99.9, 100.1);
-        Assert.Contains("OpenCode Go #1", result.Usage.Primary.Label);
+        Assert.InRange(result.Usage.Primary.UsedPercent, 93.2, 93.3);
+        Assert.Contains("Antigravity · Google · Weekly", result.Usage.Primary.Label);
     }
 
     [Fact]
@@ -81,7 +80,6 @@ public class OmpProviderTests
         var result = OmpProvider.BuildResult(SampleJson);
 
         var titles = result.Usage.ExtraRateWindows.Select(w => w.Title).ToList();
-        Assert.Contains("Antigravity · Google · Weekly", titles);
         Assert.Contains("Antigravity · Anthropic · Weekly", titles);
     }
 
@@ -124,6 +122,60 @@ public class OmpProviderTests
         var titles = result.Usage.ExtraRateWindows.Select(w => w.Title).ToList();
         Assert.Contains("X a · Weekly", titles);
         Assert.Contains("X b · Weekly", result.Usage.Primary.Label);
+    }
+
+    [Fact]
+    public void BuildResult_PartiallyEatenMonthlyAccountIsKept()
+    {
+        const string json = """
+            {"reports": [
+              {"provider": "y", "limits": [
+                {"id": "monthly", "label": "Monthly limit", "window": {"label": "Monthly"}, "amount": {"usedFraction": 0.5}, "status": "ok"},
+                {"id": "5h", "label": "5 Hour limit", "window": {"label": "5 Hour"}, "amount": {"usedFraction": 0.1}, "status": "ok"}]}
+            ]}
+            """;
+
+        var result = OmpProvider.BuildResult(json);
+
+        Assert.Contains("Monthly", result.Usage.Primary.Label);
+        Assert.Single(result.Usage.ExtraRateWindows);
+    }
+
+    [Fact]
+    public void BuildResult_WeeklyEatenAccountIsHiddenUntilReset()
+    {
+        const string json = """
+            {"reports": [
+              {"provider": "v", "limits": [
+                {"id": "weekly", "label": "Weekly limit", "window": {"label": "Weekly"}, "amount": {"usedFraction": 1}, "status": "exhausted"},
+                {"id": "5h", "label": "5 Hour limit", "window": {"label": "5 Hour"}, "amount": {"usedFraction": 0.3}, "status": "ok"}]},
+              {"provider": "w", "limits": [
+                {"id": "5h", "label": "5 Hour limit", "window": {"label": "5 Hour"}, "amount": {"usedFraction": 0.1}, "status": "ok"}]}
+            ]}
+            """;
+
+        var result = OmpProvider.BuildResult(json);
+
+        var titles = result.Usage.ExtraRateWindows.Select(w => w.Title).ToList();
+        Assert.DoesNotContain(titles, t => t.StartsWith("V "));
+        Assert.Single(titles);
+        Assert.Equal("W · 5 Hour", titles[0]);
+    }
+
+    [Fact]
+    public void BuildResult_AllEatenFallsBackToShowingEverything()
+    {
+        const string json = """
+            {"reports": [
+              {"provider": "z", "limits": [
+                {"id": "monthly", "label": "Monthly limit", "window": {"label": "Monthly"}, "amount": {"usedFraction": 1}, "status": "exhausted"}]}
+            ]}
+            """;
+
+        var result = OmpProvider.BuildResult(json);
+
+        Assert.Single(result.Usage.ExtraRateWindows);
+        Assert.InRange(result.Usage.Primary.UsedPercent, 99.9, 100.1);
     }
 
     [Fact]

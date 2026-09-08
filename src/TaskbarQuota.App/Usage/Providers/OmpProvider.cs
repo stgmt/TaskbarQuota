@@ -124,13 +124,22 @@ namespace TaskbarQuota.Usage.Providers
                 reportInfos[i] = info;
             }
 
+            // An account whose every monthly window — or every weekly window — is
+            // fully eaten is dead weight: hide the whole account so it does not
+            // bury live quotas. Filtering runs on every poll, so accounts come
+            // back by themselves after OMP reports a reset. Accounts without any
+            // monthly/weekly window are always kept.
+            var visible = reportInfos.Where(keep => !IsDeadAccount(keep)).ToList();
+            if (visible.Count == 0)
+                visible = reportInfos;
+
             var extras = new List<NamedRateWindow>();
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             string? hottestTitle = null;
             string? hottestExtraId = null;
             RateWindow? hottest = null;
 
-            foreach (var info in reportInfos)
+            foreach (var info in visible)
             {
                 string accountTag = "";
                 if (info.Siblings > 1)
@@ -244,6 +253,101 @@ namespace TaskbarQuota.Usage.Providers
                 windowMinutes,
                 resetAt,
                 resetAt is null ? null : OpenCodeProvider.FormatTimeUntil(resetAt.Value));
+        }
+
+        internal static bool IsDeadAccount((string Provider, string Email, JsonElement Limits, int Ordinal, int Siblings) info)
+        {
+            return AllEaten(info, isMonthly: true) || AllEaten(info, isMonthly: false);
+        }
+
+        internal static bool AllEaten((string Provider, string Email, JsonElement Limits, int Ordinal, int Siblings) info, bool isMonthly)
+        {
+            bool any = false;
+            foreach (var limit in info.Limits.EnumerateArray())
+            {
+                bool match = isMonthly ? IsMonthlyLimit(limit) : IsWeeklyLimit(limit);
+                if (!match)
+                    continue;
+                any = true;
+                if (LimitUsedPercent(limit) < 100)
+                    return false;
+            }
+            return any;
+        }
+
+        internal static bool IsWeeklyLimit(JsonElement limit)
+        {
+            foreach (var key in new[] { "id", "label" })
+            {
+                if (limit.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.String
+                    && ContainsWeeklyToken(el.GetString() ?? ""))
+                    return true;
+            }
+            if (limit.TryGetProperty("window", out var window) && window.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var key in new[] { "id", "label" })
+                {
+                    if (window.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.String
+                        && ContainsWeeklyToken(el.GetString() ?? ""))
+                        return true;
+                }
+            }
+            if (limit.TryGetProperty("scope", out var scope) && scope.ValueKind == JsonValueKind.Object
+                && scope.TryGetProperty("windowId", out var windowId) && windowId.ValueKind == JsonValueKind.String
+                && ContainsWeeklyToken(windowId.GetString() ?? ""))
+                return true;
+            return false;
+        }
+
+        internal static bool ContainsWeeklyToken(string value)
+        {
+            string squashed = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            return squashed.Contains("weekly") || squashed == "7d" || squashed == "1w"
+                || squashed.Contains("perweek") || squashed == "7day" || squashed == "7days";
+        }
+
+        internal static bool IsMonthlyLimit(JsonElement limit)
+        {
+            foreach (var key in new[] { "id", "label" })
+            {
+                if (limit.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.String
+                    && ContainsMonthlyToken(el.GetString() ?? ""))
+                    return true;
+            }
+            if (limit.TryGetProperty("window", out var window) && window.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var key in new[] { "id", "label" })
+                {
+                    if (window.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.String
+                        && ContainsMonthlyToken(el.GetString() ?? ""))
+                        return true;
+                }
+            }
+            if (limit.TryGetProperty("scope", out var scope) && scope.ValueKind == JsonValueKind.Object
+                && scope.TryGetProperty("windowId", out var windowId) && windowId.ValueKind == JsonValueKind.String
+                && ContainsMonthlyToken(windowId.GetString() ?? ""))
+                return true;
+            return false;
+        }
+
+        internal static bool ContainsMonthlyToken(string value)
+        {
+            string squashed = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            return squashed.Contains("monthly") || squashed.Contains("30d") || squashed == "1m" || squashed.Contains("permonth");
+        }
+
+        internal static double LimitUsedPercent(JsonElement limit)
+        {
+            if (limit.TryGetProperty("amount", out var amount) && amount.ValueKind == JsonValueKind.Object)
+            {
+                if (amount.TryGetProperty("usedFraction", out var frac) && frac.ValueKind == JsonValueKind.Number)
+                    return Math.Clamp(frac.GetDouble() * 100, 0, 100);
+                if (amount.TryGetProperty("used", out var used) && used.ValueKind == JsonValueKind.Number
+                    && amount.TryGetProperty("limit", out var cap) && cap.ValueKind == JsonValueKind.Number
+                    && cap.GetDouble() > 0)
+                    return Math.Clamp(used.GetDouble() / cap.GetDouble() * 100, 0, 100);
+            }
+            return 0;
         }
 
         internal static string BuildTitle(string provider, JsonElement limit, string accountTag)
