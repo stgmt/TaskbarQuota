@@ -68,6 +68,7 @@ internal static class ProviderInstallDetector
         ProviderId.OpenCodeGo => IsCliAvailable("opencode") || HasOpenCodeGoKey(),
         ProviderId.Cline or ProviderId.ClinePass => IsCliAvailable("cline") || File.Exists(ClineProvidersPath()),
         ProviderId.Omp => IsCliAvailable("omp"),
+        ProviderId.Meta => MetaProvider.HasSessions(),
         _ => true,
     };
 
@@ -92,6 +93,7 @@ internal static class ProviderInstallDetector
         ProviderId.OpenCodeGo => HasOpenCodeGoKey() || HasCachedCli("opencode"),
         ProviderId.Cline or ProviderId.ClinePass => File.Exists(ClineProvidersPath()) || HasCachedCli("cline"),
         ProviderId.Omp => HasCachedCli("omp"),
+        ProviderId.Meta => MetaProvider.HasSessions(),
         _ => true,
     };
 
@@ -123,6 +125,7 @@ internal static class ProviderInstallDetector
         ProviderId.OpenCodeGo => "Sign in to OpenCode Go or set OPENCODE_API_KEY.",
         ProviderId.Cline or ProviderId.ClinePass => "Install the Cline CLI (npm i -g cline) and sign in.",
         ProviderId.Omp => "Install Oh My Pi (omp) and sign in to your providers.",
+        ProviderId.Meta => "Run Meta Muse once in WSL Ubuntu-24.04.",
         _ => "Set up this provider to see usage here.",
     };
 

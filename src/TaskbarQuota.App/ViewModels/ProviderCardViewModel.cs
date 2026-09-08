@@ -299,6 +299,14 @@ namespace TaskbarQuota.ViewModels
                 }
                 else
                 {
+                    if (r.Id == ProviderId.Meta)
+                    {
+                        // No server quota exists: show local token totals as text, never as percent bars.
+                        if (u.LocalTokens5h is { } fiveHourTokens)
+                            textMetrics.Add(new TextMetricViewModel(r.Id, WidgetSettingsService.RowUsage, "5 hours", fiveHourTokens + " tokens"));
+                        if (u.LocalTokens7d is { } sevenDayTokens)
+                            textMetrics.Add(new TextMetricViewModel(r.Id, WidgetSettingsService.RowBalance, "7 days", sevenDayTokens + " tokens"));
+                    }
                     bool creditsOnly = r.Id is ProviderId.Copilot or ProviderId.Grok or ProviderId.Zai && u.Cost is { Label: "Credits" };
                     if (!creditsOnly)
                     {

@@ -357,7 +357,7 @@ public static class WidgetSettingsService
     }
 
     public static bool IsProviderPinned(ProviderId provider)
-        => ProviderPins.TryGetValue(provider.ToString(), out bool pinned) ? pinned : provider == ProviderId.Omp;
+        => ProviderPins.TryGetValue(provider.ToString(), out bool pinned) ? pinned : provider is ProviderId.Omp or ProviderId.Meta;
 
     /// <summary>
     /// Pins a provider so the taskbar widget keeps a tile for it regardless of which tool is active.

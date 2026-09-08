@@ -20,6 +20,7 @@ namespace TaskbarQuota.Usage
         Zai,
         Kimi,
         Omp,
+        Meta,
     }
 
     /// <summary>A single rate-limit window (for example session or weekly), expressed as percent used.</summary>
@@ -200,6 +201,10 @@ namespace TaskbarQuota.Usage
         public ResetCreditsSnapshot? ResetCredits { get; set; }
         /// <summary>Provider-specific usage dashboard link when known (e.g. OpenCode workspace /go or /usage).</summary>
         public string? UsageDashboardUrl { get; set; }
+        /// <summary>Local token totals for providers without a server quota (e.g. Meta Muse):
+        /// preformatted "12.3k" strings, null when unknown. Rendered as text, never as percent bars.</summary>
+        public string? LocalTokens5h { get; set; }
+        public string? LocalTokens7d { get; set; }
         /// <summary>Local transcript-derived token history and API-equivalent cost estimates.</summary>
         public UsageHistory? UsageHistory { get; set; }
 

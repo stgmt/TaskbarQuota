@@ -51,6 +51,7 @@ namespace TaskbarQuota.Usage
             Register(new ZaiProvider());
             Register(new KimiProvider());
             Register(new OmpProvider());
+            Register(new MetaProvider());
 
             // Rehydrate the previous session's values so the widget can paint real numbers at boot
             // instead of a placeholder while the first fetch runs (issue #21).
@@ -302,6 +303,8 @@ namespace TaskbarQuota.Usage
                 || !SameAdditional(left.AdditionalUsage, right.AdditionalUsage)
                 || !SameResetCredits(left.ResetCredits, right.ResetCredits)
                 || left.UsageDashboardUrl != right.UsageDashboardUrl
+                || left.LocalTokens5h != right.LocalTokens5h
+                || left.LocalTokens7d != right.LocalTokens7d
                 || left.ExtraRateWindows.Count != right.ExtraRateWindows.Count)
                 return false;
 

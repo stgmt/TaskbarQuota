@@ -126,6 +126,8 @@ namespace TaskbarQuota.Usage
                 LoginMethod = stored.LoginMethod,
                 Email = stored.Email,
                 UsageDashboardUrl = stored.UsageDashboardUrl,
+                LocalTokens5h = stored.LocalTokens5h,
+                LocalTokens7d = stored.LocalTokens7d,
                 Cost = ToCost(stored.Cost),
                 Pricing = stored.Pricing is { } pricing
                     ? new UsagePricingSnapshot(pricing.Period ?? string.Empty, pricing.Multiplier)
@@ -169,6 +171,8 @@ namespace TaskbarQuota.Usage
             LoginMethod = usage.LoginMethod,
             Email = usage.Email,
             UsageDashboardUrl = usage.UsageDashboardUrl,
+            LocalTokens5h = usage.LocalTokens5h,
+            LocalTokens7d = usage.LocalTokens7d,
             Cost = usage.Cost is { } c
                 ? new StoredCost { Amount = c.Amount, Currency = c.Currency, Label = c.Label, Limit = c.Limit, ResetsAt = c.ResetsAt }
                 : null,
@@ -254,6 +258,8 @@ namespace TaskbarQuota.Usage
             public string? LoginMethod { get; set; }
             public string? Email { get; set; }
             public string? UsageDashboardUrl { get; set; }
+            public string? LocalTokens5h { get; set; }
+            public string? LocalTokens7d { get; set; }
             public StoredCost? Cost { get; set; }
             public StoredPricing? Pricing { get; set; }
             public StoredAdditionalUsage? AdditionalUsage { get; set; }

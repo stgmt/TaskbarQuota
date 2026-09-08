@@ -554,6 +554,16 @@ namespace TaskbarQuota.Controls
                 return rows;
             }
 
+            if (result.Id == ProviderId.Meta)
+            {
+                var rows = new List<WidgetUsageRow>();
+                if (usage.LocalTokens5h is { } five && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowUsage))
+                    rows.Add(new WidgetUsageRow("5h", 0, five, HasBar: false));
+                if (usage.LocalTokens7d is { } seven && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowBalance))
+                    rows.Add(new WidgetUsageRow("7d", 0, seven, HasBar: false));
+                return rows;
+            }
+
             if (usage.ExtraRateWindows.Count > 0)
             {
                 if (WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowExtra))
