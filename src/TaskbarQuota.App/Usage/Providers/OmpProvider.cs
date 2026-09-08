@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -86,13 +87,12 @@ namespace TaskbarQuota.Usage.Providers
             if (!root.TryGetProperty("reports", out var reports) || reports.ValueKind != JsonValueKind.Array)
                 throw new ProviderException(ProviderErrorKind.Parse, "OMP response has no reports.");
 
-            var extras = new List<NamedRateWindow>();
-            var seenIds = new HashSet<string>(StringComparer.Ordinal);
-            var accountCounters = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            string? hottestTitle = null;
-            string? hottestExtraId = null;
-            RateWindow? hottest = null;
-
+            // OMP can track several accounts per service (e.g. two OpenCode Go logins).
+            // Reports carry no shared account id, so the account tag is positional within
+            // a service: the report e-mail when present, otherwise #1, #2, … in OMP order.
+            var reportInfos = new List<(string Provider, string Email, JsonElement Limits, int Ordinal, int Siblings)>();
+            var providerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var providerEmails = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var report in reports.EnumerateArray())
             {
                 string provider = report.TryGetProperty("provider", out var p) && p.ValueKind == JsonValueKind.String
@@ -101,21 +101,59 @@ namespace TaskbarQuota.Usage.Providers
                 if (!report.TryGetProperty("limits", out var limits) || limits.ValueKind != JsonValueKind.Array)
                     continue;
 
-                foreach (var limit in limits.EnumerateArray())
+                string email = "";
+                if (report.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object
+                    && metadata.TryGetProperty("email", out var emailEl) && emailEl.ValueKind == JsonValueKind.String)
+                    email = (emailEl.GetString() ?? "").Trim();
+
+                int ordinal = providerCounts.TryGetValue(provider, out int n) ? n + 1 : 1;
+                providerCounts[provider] = ordinal;
+                if (!providerEmails.TryGetValue(provider, out var emails))
+                {
+                    emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    providerEmails[provider] = emails;
+                }
+                if (!string.IsNullOrEmpty(email))
+                    emails.Add(email);
+                reportInfos.Add((provider, email, limits, ordinal, 0));
+            }
+            for (int i = 0; i < reportInfos.Count; i++)
+            {
+                var info = reportInfos[i];
+                info.Siblings = providerCounts[info.Provider];
+                reportInfos[i] = info;
+            }
+
+            var extras = new List<NamedRateWindow>();
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            string? hottestTitle = null;
+            string? hottestExtraId = null;
+            RateWindow? hottest = null;
+
+            foreach (var info in reportInfos)
+            {
+                string accountTag = "";
+                if (info.Siblings > 1)
+                {
+                    accountTag = !string.IsNullOrEmpty(info.Email) && providerEmails[info.Provider].Count > 1
+                        ? EmailPrefix(info.Email)
+                        : $"#{info.Ordinal}";
+                }
+
+                foreach (var limit in info.Limits.EnumerateArray())
                 {
                     string limitId = limit.TryGetProperty("id", out var lid) && lid.ValueKind == JsonValueKind.String
                         ? lid.GetString() ?? "limit"
                         : "limit";
-                    string baseId = $"{provider}:{limitId}";
-                    int occurrence = accountCounters.TryGetValue(baseId, out int n) ? n + 1 : 1;
-                    accountCounters[baseId] = occurrence;
-                    string id = occurrence == 1 ? baseId : $"{baseId}#{occurrence}";
+                    string id = info.Siblings > 1
+                        ? $"{info.Provider}#{info.Ordinal}:{limitId}"
+                        : $"{info.Provider}:{limitId}";
 
                     var window = BuildWindow(limit);
                     if (window is null)
                         continue;
 
-                    string title = BuildTitle(provider, limit, occurrence);
+                    string title = BuildTitle(info.Provider, limit, accountTag);
                     if (!seenIds.Add(id))
                         continue;
                     extras.Add(new NamedRateWindow(id, title, window));
@@ -137,7 +175,7 @@ namespace TaskbarQuota.Usage.Providers
             foreach (var extra in extras)
             {
                 if (extra.Id == hottestExtraId)
-                    continue; // primary already carries the hottest window; avoid a duplicate first bar
+                    continue; // primary already carries the hottest window; avoid a duplicate bar
                 snapshot.ExtraRateWindows.Add(extra);
             }
             // If everything collapsed to the primary (single-limit OMP), still show its bar in the list.
@@ -208,11 +246,11 @@ namespace TaskbarQuota.Usage.Providers
                 resetAt is null ? null : OpenCodeProvider.FormatTimeUntil(resetAt.Value));
         }
 
-        private static string BuildTitle(string provider, JsonElement limit, int occurrence)
+        internal static string BuildTitle(string provider, JsonElement limit, string accountTag)
         {
             string service = ServiceShortName(provider);
-            if (occurrence > 1)
-                service = $"{service} #{occurrence}";
+            if (!string.IsNullOrEmpty(accountTag))
+                service = $"{service} {accountTag}";
 
             string limitLabel = limit.TryGetProperty("label", out var ll) && ll.ValueKind == JsonValueKind.String
                 ? (ll.GetString() ?? "").Trim()
@@ -232,11 +270,40 @@ namespace TaskbarQuota.Usage.Providers
                 amountSuffix = $" {FormatCount(used.GetDouble())}/{FormatCount(cap.GetDouble())}";
             }
 
-            // Prefer the window label ("5 Hour", "Weekly") — short and uniform across services.
-            string core = !string.IsNullOrEmpty(windowLabel) ? windowLabel : limitLabel;
-            if (string.IsNullOrEmpty(core))
-                core = "Usage";
+            // "Usage (Google)" carries the qualifier that tells same-named windows apart.
+            string qualifier = "";
+            int paren = limitLabel.IndexOf('(');
+            int parenEnd = paren >= 0 ? limitLabel.IndexOf(')', paren + 1) : -1;
+            if (paren >= 0 && parenEnd > paren + 1)
+                qualifier = limitLabel.Substring(paren + 1, parenEnd - paren - 1).Trim();
+
+            string core;
+            if (!string.IsNullOrEmpty(qualifier))
+                core = string.IsNullOrEmpty(windowLabel) ? qualifier : $"{qualifier} · {windowLabel}";
+            else if (string.IsNullOrEmpty(windowLabel))
+                core = string.IsNullOrEmpty(limitLabel) ? "Usage" : limitLabel;
+            else if (string.IsNullOrEmpty(limitLabel)
+                || limitLabel.Contains(windowLabel, StringComparison.OrdinalIgnoreCase)
+                || IsSameName(limitLabel, service))
+                core = windowLabel;
+            else
+                core = $"{limitLabel} · {windowLabel}";
+
             return $"{service} · {core}{amountSuffix}";
+        }
+
+        private static bool IsSameName(string label, string service)
+        {
+            static string Squash(string value)
+                => new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            return Squash(label) == Squash(service);
+        }
+
+        private static string EmailPrefix(string email)
+        {
+            int at = email.IndexOf('@');
+            string local = (at > 0 ? email.Substring(0, at) : email).Trim();
+            return string.IsNullOrEmpty(local) ? email : local;
         }
 
         private static string ServiceShortName(string provider) => provider switch

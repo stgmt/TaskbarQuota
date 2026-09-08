@@ -26,18 +26,22 @@ public class OmpProviderTests
             },
             {
               "provider": "zai",
+              "metadata": {"email": "stigmat.rudnev@gmail.com"},
               "limits": [
                 {"id": "zai:credits:5h", "label": "ZAI 5 Hours Credit Quota", "window": {"id": "5h", "label": "5 Hours", "durationMs": 18000000, "resetsAt": 1788810365523}, "amount": {"used": 132, "limit": 2000, "remaining": 1868, "usedFraction": 0.066, "remainingFraction": 0.934, "unit": "credits"}, "status": "ok"}
               ]
             },
             {
               "provider": "google-antigravity",
+              "metadata": {"email": "mail.stgmt@gmail.com"},
               "limits": [
-                {"id": "google-antigravity:google:default:gemini-weekly", "label": "Usage (Google)", "window": {"id": "weekly", "label": "Weekly", "resetsAt": 1789064397000, "durationMs": 604800000}, "amount": {"used": 93.2625465, "limit": 100, "usedFraction": 0.932625465, "unit": "percent"}, "status": "warning"}
+                {"id": "google-antigravity:google:default:gemini-weekly", "label": "Usage (Google)", "window": {"id": "weekly", "label": "Weekly", "resetsAt": 1789064397000, "durationMs": 604800000}, "amount": {"used": 93.2625465, "limit": 100, "usedFraction": 0.932625465, "unit": "percent"}, "status": "warning"},
+                {"id": "google-antigravity:anthropic:default:3p-weekly", "label": "Usage (Anthropic)", "window": {"id": "weekly", "label": "Weekly", "resetsAt": 1789074320000, "durationMs": 604800000}, "amount": {"used": 71.1, "limit": 100, "usedFraction": 0.711, "unit": "percent"}, "status": "ok"}
               ]
             },
             {
               "provider": "cline-pass",
+              "metadata": {"email": "stigmat.rudnev@gmail.com"},
               "limits": [
                 {"id": "cline-pass:5h", "label": "ClinePass", "window": {"id": "5h", "label": "5 Hour"}, "amount": {"used": 0, "limit": 100, "usedFraction": 0, "unit": "percent"}, "status": "ok"},
                 {"id": "broken", "label": "Broken", "window": {"id": "5h", "label": "5 Hour"}, "status": "ok"}
@@ -52,13 +56,13 @@ public class OmpProviderTests
     {
         var result = OmpProvider.BuildResult(SampleJson);
 
-        // 7 parseable limits (broken entry without amount is skipped):
-        // hottest becomes Primary, the other 6 land in the expandable list.
-        Assert.Equal(6, result.Usage.ExtraRateWindows.Count);
+        // 8 parseable limits (broken entry without amount is skipped):
+        // hottest becomes Primary, the other 7 land in the expandable list.
+        Assert.Equal(7, result.Usage.ExtraRateWindows.Count);
         var ids = result.Usage.ExtraRateWindows.Select(w => w.Id).ToList();
         Assert.Equal(ids.Count, ids.Distinct().Count());
-        // Second opencode-go account gets a suffixed id, not a collision.
-        Assert.Contains("opencode-go:rolling-5h#2", ids);
+        // Second opencode-go account gets an ordinal-suffixed id, not a collision.
+        Assert.Contains("opencode-go#2:rolling-5h", ids);
     }
 
     [Fact]
@@ -68,7 +72,17 @@ public class OmpProviderTests
 
         // opencode-go monthly is exhausted at 100% — hotter than Antigravity weekly at 93.3%.
         Assert.InRange(result.Usage.Primary.UsedPercent, 99.9, 100.1);
-        Assert.Contains("OpenCode Go", result.Usage.Primary.Label);
+        Assert.Contains("OpenCode Go #1", result.Usage.Primary.Label);
+    }
+
+    [Fact]
+    public void BuildResult_SameNamedWindowsKeepTheirQualifier()
+    {
+        var result = OmpProvider.BuildResult(SampleJson);
+
+        var titles = result.Usage.ExtraRateWindows.Select(w => w.Title).ToList();
+        Assert.Contains("Antigravity · Google · Weekly", titles);
+        Assert.Contains("Antigravity · Anthropic · Weekly", titles);
     }
 
     [Fact]
@@ -88,8 +102,28 @@ public class OmpProviderTests
         var result = OmpProvider.BuildResult(SampleJson);
 
         var cline = result.Usage.ExtraRateWindows.First(w => w.Id == "cline-pass:cline-pass:5h");
+        Assert.Equal("Cline Pass · 5 Hour", cline.Title);
         Assert.Null(cline.Window.ResetAt);
         Assert.Null(cline.Window.ResetDescription);
+    }
+
+    [Fact]
+    public void BuildResult_DistinctEmailsBecomeAccountTags()
+    {
+        const string json = """
+            {"reports": [
+              {"provider": "x", "metadata": {"email": "a@one.com"}, "limits": [
+                {"id": "w", "label": "Weekly limit", "window": {"label": "Weekly"}, "amount": {"usedFraction": 0.1}, "status": "ok"}]},
+              {"provider": "x", "metadata": {"email": "b@two.com"}, "limits": [
+                {"id": "w", "label": "Weekly limit", "window": {"label": "Weekly"}, "amount": {"usedFraction": 0.2}, "status": "ok"}]}
+            ]}
+            """;
+
+        var result = OmpProvider.BuildResult(json);
+
+        var titles = result.Usage.ExtraRateWindows.Select(w => w.Title).ToList();
+        Assert.Contains("X a · Weekly", titles);
+        Assert.Contains("X b · Weekly", result.Usage.Primary.Label);
     }
 
     [Fact]
