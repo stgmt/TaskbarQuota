@@ -299,9 +299,9 @@ namespace TaskbarQuota.ViewModels
                 }
                 else
                 {
-                    if (r.Id == ProviderId.Meta)
+                    if (r.Id == ProviderId.Meta && !u.HasPrimaryWindow)
                     {
-                        // No server quota exists: show local token totals as text, never as percent bars.
+                        // Local-fallback snapshot (server unreachable): token totals as text, never as percent bars.
                         if (u.LocalTokens5h is { } fiveHourTokens)
                             textMetrics.Add(new TextMetricViewModel(r.Id, WidgetSettingsService.RowUsage, "5 hours", fiveHourTokens + " tokens"));
                         if (u.LocalTokens7d is { } sevenDayTokens)

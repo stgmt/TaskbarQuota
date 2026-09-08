@@ -78,6 +78,36 @@ public class MetaProviderTests
     }
 
     [Fact]
+    public void BuildServerResult_MapsQuotaWindowsToBars()
+    {
+        const string json = """
+            {"user_email": "mail.stgmt@gmail.com", "subs_tier_name": "Muse Code Power Usage",
+             "subs_usage": {
+               "window": {"used_percent": 15, "window_duration_mins": 300, "resets_at": 1788845673},
+               "weekly": {"used_percent": 59, "resets_at": 1789344000}}}
+            """;
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var result = MetaProvider.BuildServerResult(doc.RootElement);
+
+        Assert.InRange(result.Usage.Primary.UsedPercent, 14.9, 15.1);
+        Assert.Equal(300, result.Usage.Primary.WindowMinutes);
+        Assert.NotNull(result.Usage.Primary.ResetAt);
+        Assert.NotNull(result.Usage.Secondary);
+        Assert.InRange(result.Usage.Secondary!.UsedPercent, 58.9, 59.1);
+        Assert.Equal("mail.stgmt@gmail.com", result.Usage.Email);
+        Assert.True(result.Usage.HasPrimaryWindow);
+    }
+
+    [Fact]
+    public void BuildServerResult_MissingUsageThrowsParse()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("{}");
+        var ex = Assert.Throws<ProviderException>(() => MetaProvider.BuildServerResult(doc.RootElement));
+        Assert.Equal(ProviderErrorKind.Parse, ex.Kind);
+    }
+
+    [Fact]
     public void FormatTokens_FormatsCounts()
     {
         Assert.Equal("0", MetaProvider.FormatTokens(0));

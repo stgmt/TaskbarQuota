@@ -554,7 +554,7 @@ namespace TaskbarQuota.Controls
                 return rows;
             }
 
-            if (result.Id == ProviderId.Meta)
+            if (result.Id == ProviderId.Meta && !usage.HasPrimaryWindow)
             {
                 var rows = new List<WidgetUsageRow>();
                 if (usage.LocalTokens5h is { } five && WidgetSettingsService.IsRowVisible(result.Id, WidgetSettingsService.RowUsage))

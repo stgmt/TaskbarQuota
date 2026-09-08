@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,10 +14,10 @@ using System.Threading.Tasks;
 namespace TaskbarQuota.Usage.Providers
 {
     /// <summary>
-    /// Meta Muse (WSL): aggregates local session token usage (goal_usage_attribution
-    /// records) into rolling 5-hour / 7-day totals. Shown as token counts — Muse
-    /// exposes no server quota to compare against, so no percents are fabricated.
-    /// Refreshes on the standard 60s usage cadence.
+    /// Meta Muse: server quota (5-hour + weekly percents with resets) polled from
+    /// the Muse channel API with the WSL login, refreshed on the standard 60s
+    /// usage cadence. When the server is unreachable, falls back to local session
+    /// token totals so the card never goes blank without a reason.
     /// </summary>
     public sealed class MetaProvider : IUsageProvider
     {
@@ -24,6 +28,8 @@ namespace TaskbarQuota.Usage.Providers
         public BillingKind Billing => BillingKind.Subscription;
 
         internal const string WslDistro = "Ubuntu-24.04";
+        private const string KeyUrl = "https://api.meta.ai/muse-code/key";
+        private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
         private static readonly TimeSpan HomesCacheTtl = TimeSpan.FromMinutes(5);
         private static readonly object HomesLock = new();
         private static IReadOnlyList<string> _cachedHomes = Array.Empty<string>();
@@ -31,12 +37,144 @@ namespace TaskbarQuota.Usage.Providers
 
         public async Task<ProviderFetchResult> FetchUsageAsync(CancellationToken ct = default)
         {
-            string? sessionsRoot = ResolveSessionsRoot();
-            if (sessionsRoot is null)
-                throw new ProviderException(ProviderErrorKind.NotInstalled, "Meta Muse sessions not found in WSL. Run muse once in Ubuntu-24.04.");
+            try
+            {
+                return await FetchServerUsageAsync(ct).ConfigureAwait(false);
+            }
+            catch (ProviderException ex) when (ex.Kind is ProviderErrorKind.AuthRequired or ProviderErrorKind.NotInstalled)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException)
+            {
+                // Server hiccup: fall back to local session totals instead of a dead card.
+                string? sessionsRoot = ResolveSessionsRoot();
+                if (sessionsRoot is null)
+                    throw new ProviderException(ProviderErrorKind.NotInstalled, "Meta Muse sessions not found in WSL. Run muse once in Ubuntu-24.04.");
+                try
+                {
+                    return BuildSnapshot(sessionsRoot, DateTimeOffset.Now, ct);
+                }
+                catch (ProviderException)
+                {
+                    throw new ProviderException(ProviderErrorKind.Other, "Meta quota unreachable and no local sessions to show.");
+                }
+            }
+        }
 
-            // File IO is quick; hop off the caller thread so UI ticks never block on \\wsl$.
-            return await Task.Run(() => BuildSnapshot(sessionsRoot, DateTimeOffset.Now, ct), ct).ConfigureAwait(false);
+        internal static async Task<ProviderFetchResult> FetchServerUsageAsync(CancellationToken ct)
+        {
+            string accessToken = LoadAccessToken();
+            using var request = new HttpRequestMessage(HttpMethod.Post, KeyUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+            using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                throw new ProviderException(ProviderErrorKind.AuthRequired, "Meta login expired. Run /login in muse.");
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                throw new ProviderException(ProviderErrorKind.RateLimited, "Meta API rate limited. Try again later.");
+            if (!response.IsSuccessStatusCode)
+                throw new ProviderException(ProviderErrorKind.Other, $"Meta API returned {(int)response.StatusCode}.");
+
+            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            try
+            {
+                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+                return BuildServerResult(doc.RootElement);
+            }
+            catch (JsonException ex)
+            {
+                throw new ProviderException(ProviderErrorKind.Parse, $"Meta API returned malformed JSON: {ex.Message}", ex);
+            }
+        }
+
+        internal static ProviderFetchResult BuildServerResult(JsonElement root)
+        {
+            if (!root.TryGetProperty("subs_usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+                throw new ProviderException(ProviderErrorKind.Parse, "Meta API returned no usage.");
+            if (!usage.TryGetProperty("window", out var window) || window.ValueKind != JsonValueKind.Object)
+                throw new ProviderException(ProviderErrorKind.Parse, "Meta API returned no 5-hour window.");
+
+            var primary = ParseQuotaWindow(window, defaultMinutes: 300, fallbackLabel: "5 hours");
+            RateWindow? secondary = null;
+            if (usage.TryGetProperty("weekly", out var weekly) && weekly.ValueKind == JsonValueKind.Object)
+                secondary = ParseQuotaWindow(weekly, defaultMinutes: 10080, fallbackLabel: "Weekly");
+
+            string? email = root.TryGetProperty("user_email", out var emailEl) && emailEl.ValueKind == JsonValueKind.String
+                ? emailEl.GetString()
+                : null;
+            string? tier = root.TryGetProperty("subs_tier_name", out var tierEl) && tierEl.ValueKind == JsonValueKind.String
+                ? tierEl.GetString()
+                : null;
+
+            var snapshot = new UsageSnapshot(primary)
+            {
+                Secondary = secondary,
+                LoginMethod = string.IsNullOrWhiteSpace(tier) ? "Muse" : tier,
+                Email = email ?? string.Empty,
+            };
+            return new ProviderFetchResult(snapshot, "meta-api");
+        }
+
+        internal static RateWindow ParseQuotaWindow(JsonElement window, int defaultMinutes, string fallbackLabel)
+        {
+            double percent = 0;
+            if (window.TryGetProperty("used_percent", out var percentEl) && percentEl.ValueKind == JsonValueKind.Number)
+                percent = percentEl.GetDouble();
+
+            int minutes = defaultMinutes;
+            if (window.TryGetProperty("window_duration_mins", out var minsEl) && minsEl.ValueKind == JsonValueKind.Number)
+            {
+                double m = minsEl.GetDouble();
+                if (!double.IsNaN(m) && !double.IsInfinity(m) && m > 0)
+                    minutes = (int)Math.Round(m);
+            }
+
+            DateTimeOffset? resetAt = null;
+            if (window.TryGetProperty("resets_at", out var resetEl) && resetEl.ValueKind == JsonValueKind.Number
+                && resetEl.TryGetInt64(out long resetSec) && resetSec > 0)
+            {
+                try { resetAt = DateTimeOffset.FromUnixTimeSeconds(resetSec); }
+                catch (ArgumentOutOfRangeException) { resetAt = null; }
+            }
+
+            return new RateWindow(
+                Math.Clamp(percent, 0, 100),
+                minutes,
+                resetAt,
+                resetAt is null ? null : OpenCodeProvider.FormatTimeUntil(resetAt.Value),
+                label: fallbackLabel);
+        }
+
+        internal static string LoadAccessToken() => TryLoadAccessToken()
+            ?? throw new ProviderException(ProviderErrorKind.AuthRequired, "Meta login not found. Run /login in muse.");
+
+        internal static string? TryLoadAccessToken(string? homeOverride = null)
+        {
+            foreach (var home in ResolveHomes(homeOverride))
+            {
+                try
+                {
+                    string path = Path.Combine(home, ".config", "muse", "auth.json");
+                    if (!File.Exists(path))
+                        continue;
+                    using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                    if (doc.RootElement.TryGetProperty("providers", out var providers)
+                        && providers.ValueKind == JsonValueKind.Object
+                        && providers.TryGetProperty("meta", out var meta)
+                        && meta.ValueKind == JsonValueKind.Object
+                        && meta.TryGetProperty("access_token", out var token)
+                        && token.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(token.GetString()))
+                        return token.GetString()!.Trim();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    // Unreadable home — try the next one.
+                }
+            }
+            return null;
         }
 
         internal static bool HasSessions()
@@ -69,8 +207,10 @@ namespace TaskbarQuota.Usage.Providers
             return null;
         }
 
-        internal static IReadOnlyList<string> ResolveHomes()
+        internal static IReadOnlyList<string> ResolveHomes(string? homeOverride = null)
         {
+            if (!string.IsNullOrWhiteSpace(homeOverride))
+                return new[] { homeOverride };
             lock (HomesLock)
             {
                 if (DateTimeOffset.Now - _cachedHomesAt < HomesCacheTtl)
